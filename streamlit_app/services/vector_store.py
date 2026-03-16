@@ -1,15 +1,17 @@
 """
-In-memory vector store with cosine similarity search.
-Supports Azure OpenAI embeddings via a passed AzureOpenAI client.
+In-memory document store with TF-IDF retrieval.
+No embedding deployment required — only a chat deployment is needed.
 """
 from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from typing import Optional
 import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity as sk_cosine
 
-CHUNK_SIZE    = 800   # words per chunk
-CHUNK_OVERLAP = 150   # words overlap
+CHUNK_SIZE    = 800
+CHUNK_OVERLAP = 150
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -30,16 +32,6 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cosine similarity
-# ─────────────────────────────────────────────────────────────────────────────
-
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    a, b = np.array(a), np.array(b)
-    denom = np.linalg.norm(a) * np.linalg.norm(b)
-    return float(np.dot(a, b) / denom) if denom else 0.0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Data classes
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -52,7 +44,6 @@ class Chunk:
     chunk_index: int
     total_chunks: int
     text: str
-    embedding: list[float]
 
 
 @dataclass
@@ -66,35 +57,27 @@ class DocumentMeta:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Vector Store
+# Vector Store (TF-IDF based)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class VectorStore:
     def __init__(self):
         self.documents: dict[str, DocumentMeta] = {}
         self.chunks: list[Chunk] = []
+        self._vectorizer: Optional[TfidfVectorizer] = None
+        self._matrix = None  # sparse TF-IDF matrix
 
     # ── Ingestion ─────────────────────────────────────────────────────────────
 
-    def add_document(self, parsed: dict, client, embed_deployment: str) -> DocumentMeta:
-        """
-        client: AzureOpenAI (or OpenAI) instance
-        embed_deployment: Azure deployment name for embeddings
-        """
+    def add_document(self, parsed: dict, *args, **kwargs) -> DocumentMeta:
+        """Add a document. Extra args ignored (backward compat with old embed API)."""
         file_id = str(uuid.uuid4())
         raw_chunks = chunk_text(parsed["text"])
         if not raw_chunks:
             raise ValueError("No text could be extracted from the document.")
 
-        BATCH = 100
-        all_embeddings: list[list[float]] = []
-        for i in range(0, len(raw_chunks), BATCH):
-            batch_texts = [c["text"] for c in raw_chunks[i : i + BATCH]]
-            resp = client.embeddings.create(model=embed_deployment, input=batch_texts)
-            all_embeddings.extend([d.embedding for d in resp.data])
-
         total = len(raw_chunks)
-        for idx, (rc, emb) in enumerate(zip(raw_chunks, all_embeddings)):
+        for idx, rc in enumerate(raw_chunks):
             self.chunks.append(Chunk(
                 id=f"{file_id}_{idx}",
                 file_id=file_id,
@@ -103,7 +86,6 @@ class VectorStore:
                 chunk_index=idx,
                 total_chunks=total,
                 text=rc["text"],
-                embedding=emb,
             ))
 
         meta = DocumentMeta(
@@ -115,54 +97,69 @@ class VectorStore:
             chunk_count=total,
         )
         self.documents[file_id] = meta
+        self._rebuild_index()
         return meta
+
+    def _rebuild_index(self):
+        if not self.chunks:
+            self._vectorizer = None
+            self._matrix = None
+            return
+        self._vectorizer = TfidfVectorizer(
+            ngram_range=(1, 2),
+            max_features=50_000,
+            sublinear_tf=True,
+        )
+        self._matrix = self._vectorizer.fit_transform([c.text for c in self.chunks])
 
     # ── Retrieval ─────────────────────────────────────────────────────────────
 
     def search(
         self,
         query: str,
-        client,
-        embed_deployment: str,
+        *args,             # absorb old client / embed_deploy params
         top_k: int = 6,
         file_ids: Optional[list[str]] = None,
+        **kwargs,
     ) -> list[dict]:
-        resp = client.embeddings.create(model=embed_deployment, input=[query])
-        q_emb = resp.data[0].embedding
-
-        candidates = self.chunks
-        if file_ids:
-            candidates = [c for c in candidates if c.file_id in file_ids]
-
-        if not candidates:
+        if self._vectorizer is None or self._matrix is None:
             return []
 
-        scored = sorted(
-            candidates,
-            key=lambda c: cosine_similarity(q_emb, c.embedding),
-            reverse=True,
-        )[:top_k]
+        candidates_idx = list(range(len(self.chunks)))
+        if file_ids:
+            candidates_idx = [i for i, c in enumerate(self.chunks) if c.file_id in file_ids]
+        if not candidates_idx:
+            return []
 
-        return [
-            {
-                "source_id": i + 1,
-                "label": f"SOURCE_{i + 1}",
+        q_vec = self._vectorizer.transform([query])
+        sub_matrix = self._matrix[candidates_idx]
+        scores = sk_cosine(q_vec, sub_matrix).flatten()
+
+        top_local = np.argsort(scores)[::-1][:top_k]
+        results = []
+        for rank, local_i in enumerate(top_local):
+            global_i = candidates_idx[local_i]
+            c = self.chunks[global_i]
+            score = float(scores[local_i])
+            results.append({
+                "source_id": rank + 1,
+                "label": f"SOURCE_{rank + 1}",
                 "file_id": c.file_id,
                 "filename": c.filename,
                 "chunk_index": c.chunk_index,
                 "total_chunks": c.total_chunks,
                 "text": c.text,
-                "score": cosine_similarity(q_emb, c.embedding),
+                "score": score,
                 "excerpt": c.text[:300] + ("..." if len(c.text) > 300 else ""),
-            }
-            for i, c in enumerate(scored)
-        ]
+            })
+        return results
 
     # ── Management ────────────────────────────────────────────────────────────
 
     def remove_document(self, file_id: str):
         self.documents.pop(file_id, None)
         self.chunks = [c for c in self.chunks if c.file_id != file_id]
+        self._rebuild_index()
 
     def list_documents(self) -> list[DocumentMeta]:
         return list(self.documents.values())

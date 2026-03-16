@@ -372,7 +372,7 @@ def _init():
         "az_client":       None,
         "az_ok":           False,
         "chat_deploy":     "",
-        "embed_deploy":    "",
+        "embed_deploy":    "",  # kept for compat, unused
         "selected_docs":   [],
         "batch_results":   [],
     }
@@ -524,27 +524,23 @@ with st.sidebar:
             placeholder="gpt-4o-mini",
             help="Your deployed model name for chat (e.g. gpt-4o-mini)",
         )
-        embed_deploy = st.text_input(
-            "Embedding Deployment Name",
-            value=os.getenv("AZURE_EMBED_DEPLOYMENT", "text-embedding-3-small"),
-            placeholder="text-embedding-3-small",
-            help="Your deployed model name for embeddings",
-        )
-
         if st.button("✓ Connect", use_container_width=True):
-            if az_endpoint and az_key and az_version and chat_deploy and embed_deploy:
+            if az_endpoint and az_key and az_version and chat_deploy:
                 try:
                     client = AzureOpenAI(
                         azure_endpoint=az_endpoint.rstrip("/"),
                         api_key=az_key,
                         api_version=az_version,
                     )
-                    # Quick test
-                    client.embeddings.create(model=embed_deploy, input=["test"])
-                    st.session_state.az_client    = client
-                    st.session_state.chat_deploy  = chat_deploy
-                    st.session_state.embed_deploy = embed_deploy
-                    st.session_state.az_ok        = True
+                    # Quick validation — send a tiny chat request
+                    client.chat.completions.create(
+                        model=chat_deploy,
+                        messages=[{"role": "user", "content": "ping"}],
+                        max_tokens=1,
+                    )
+                    st.session_state.az_client   = client
+                    st.session_state.chat_deploy = chat_deploy
+                    st.session_state.az_ok       = True
                     st.rerun()
                 except Exception as e:
                     st.error(f"Connection failed: {e}")
@@ -585,7 +581,7 @@ with st.sidebar:
                 try:
                     parsed = parse_file(uf.read(), uf.name)
                     bar.progress((i + 0.5) / len(new_files), text=f"🧠 Embedding {uf.name}…")
-                    vs.add_document(parsed, st.session_state.az_client, st.session_state.embed_deploy)
+                    vs.add_document(parsed)
                 except Exception as e:
                     st.error(f"❌ {uf.name}: {e}")
             bar.progress(1.0, text="✅ Done!")
@@ -660,7 +656,7 @@ with st.sidebar:
     st.markdown(f"""
     <div style="text-align:center;margin-top:0.5rem;">
       <span class="stat-pill">
-        {st.session_state.chat_deploy or "—"} · {st.session_state.embed_deploy or "—"}
+        {st.session_state.chat_deploy or "—"} · TF-IDF retrieval
       </span>
     </div>
     """, unsafe_allow_html=True)
@@ -688,7 +684,6 @@ docs = vs.list_documents()
 az_ok = st.session_state.az_ok
 client = st.session_state.az_client
 chat_d  = st.session_state.chat_deploy
-embed_d = st.session_state.embed_deploy
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -791,7 +786,7 @@ with tab_chat:
         file_ids = st.session_state.selected_docs or None
         with st.spinner("🔍 Searching knowledge base…"):
             try:
-                chunks = vs.search(q, client, embed_d, top_k=6, file_ids=file_ids)
+                chunks = vs.search(q, top_k=6, file_ids=file_ids)
             except Exception as e:
                 st.error(f"Search error: {e}")
                 st.stop()
@@ -946,7 +941,7 @@ with tab_batch:
                 bar.progress(i / len(questions), text=f"Q{i+1}/{len(questions)}: {q[:60]}…")
                 stat.markdown(f'<div class="stat-pill">Processing {i+1} of {len(questions)}</div>', unsafe_allow_html=True)
                 try:
-                    chunks = vs.search(q, client, embed_d, top_k=top_k_batch, file_ids=file_ids_batch)
+                    chunks = vs.search(q, top_k=top_k_batch, file_ids=file_ids_batch)
                     answer = get_answer(q, chunks, client, chat_d)
                 except Exception as e:
                     answer = f"Error: {e}"
