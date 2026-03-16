@@ -57,6 +57,8 @@ def stream_answer(
         max_tokens=2000,
     )
     for chunk in stream:
+        if not chunk.choices:          # Azure sends empty-choices keep-alive chunks
+            continue
         delta = chunk.choices[0].delta.content or ""
         if delta:
             yield delta
