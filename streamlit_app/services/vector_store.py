@@ -1,16 +1,15 @@
 """
 In-memory vector store with cosine similarity search.
+Supports Azure OpenAI embeddings via a passed AzureOpenAI client.
 """
 from __future__ import annotations
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 import numpy as np
-from openai import OpenAI
 
-EMBED_MODEL = "text-embedding-3-small"
-CHUNK_SIZE  = 800   # words per chunk
-CHUNK_OVERLAP = 150  # words overlap
+CHUNK_SIZE    = 800   # words per chunk
+CHUNK_OVERLAP = 150   # words overlap
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,18 +76,21 @@ class VectorStore:
 
     # ── Ingestion ─────────────────────────────────────────────────────────────
 
-    def add_document(self, parsed: dict, client: OpenAI) -> DocumentMeta:
+    def add_document(self, parsed: dict, client, embed_deployment: str) -> DocumentMeta:
+        """
+        client: AzureOpenAI (or OpenAI) instance
+        embed_deployment: Azure deployment name for embeddings
+        """
         file_id = str(uuid.uuid4())
         raw_chunks = chunk_text(parsed["text"])
         if not raw_chunks:
             raise ValueError("No text could be extracted from the document.")
 
-        # Batch embed
         BATCH = 100
         all_embeddings: list[list[float]] = []
         for i in range(0, len(raw_chunks), BATCH):
             batch_texts = [c["text"] for c in raw_chunks[i : i + BATCH]]
-            resp = client.embeddings.create(model=EMBED_MODEL, input=batch_texts)
+            resp = client.embeddings.create(model=embed_deployment, input=batch_texts)
             all_embeddings.extend([d.embedding for d in resp.data])
 
         total = len(raw_chunks)
@@ -120,11 +122,12 @@ class VectorStore:
     def search(
         self,
         query: str,
-        client: OpenAI,
+        client,
+        embed_deployment: str,
         top_k: int = 6,
         file_ids: Optional[list[str]] = None,
     ) -> list[dict]:
-        resp = client.embeddings.create(model=EMBED_MODEL, input=[query])
+        resp = client.embeddings.create(model=embed_deployment, input=[query])
         q_emb = resp.data[0].embedding
 
         candidates = self.chunks

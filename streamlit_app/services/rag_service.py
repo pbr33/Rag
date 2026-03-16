@@ -1,11 +1,8 @@
 """
-RAG service — builds context prompt and streams GPT-4o mini response.
+RAG service — builds context prompt and streams Azure OpenAI response.
 """
 from __future__ import annotations
 from typing import Generator
-from openai import OpenAI
-
-CHAT_MODEL = "gpt-4o-mini"
 
 SYSTEM_PROMPT = """You are an expert AI assistant for Qualcomm's Document Intelligence platform.
 You answer questions accurately and concisely based ONLY on the provided document context.
@@ -37,9 +34,10 @@ def build_context(chunks: list[dict]) -> str:
 def stream_answer(
     query: str,
     chunks: list[dict],
-    client: OpenAI,
+    client,
+    chat_deployment: str,
 ) -> Generator[str, None, None]:
-    """Yield streamed token strings from GPT-4o mini."""
+    """Yield streamed token strings from the Azure OpenAI chat deployment."""
     context = build_context(chunks)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -52,7 +50,7 @@ def stream_answer(
         },
     ]
     stream = client.chat.completions.create(
-        model=CHAT_MODEL,
+        model=chat_deployment,
         messages=messages,
         stream=True,
         temperature=0.15,
@@ -62,3 +60,13 @@ def stream_answer(
         delta = chunk.choices[0].delta.content or ""
         if delta:
             yield delta
+
+
+def get_answer(
+    query: str,
+    chunks: list[dict],
+    client,
+    chat_deployment: str,
+) -> str:
+    """Non-streaming version — returns full answer string (used by batch mode)."""
+    return "".join(stream_answer(query, chunks, client, chat_deployment))
