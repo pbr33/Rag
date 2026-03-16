@@ -76,37 +76,34 @@ def _parse_excel(data: bytes, filename: str) -> dict:
     xl = pd.ExcelFile(io.BytesIO(data))
     parts = []
     for sheet in xl.sheet_names:
-        # Read raw so we can detect header row
         raw = xl.parse(sheet, header=None).fillna("")
 
-        # Find the first row that has at least 2 non-empty cells — treat as header
-        header_row = 0
-        for i, row in raw.iterrows():
-            non_empty = [str(v).strip() for v in row if str(v).strip()]
-            if len(non_empty) >= 2:
-                header_row = i
-                break
+        # Use the row with the MOST non-empty cells as the header row.
+        # This reliably finds the real column-header row even when the sheet
+        # starts with title/metadata rows (e.g. TechnicalQuery sheets).
+        non_empty_counts = {
+            i: sum(1 for v in row if str(v).strip())
+            for i, row in raw.iterrows()
+        }
+        header_row = max(non_empty_counts, key=non_empty_counts.get)
 
         df = xl.parse(sheet, header=header_row)
-        # Drop fully-empty columns and rows
         df = df.dropna(how="all").dropna(axis=1, how="all")
-        # Rename any "Unnamed: N" columns to generic Col_N
+        # Rename Unnamed columns to Col_N
         df.columns = [
             c if not str(c).startswith("Unnamed:") else f"Col_{i+1}"
             for i, c in enumerate(df.columns)
         ]
         df = df.fillna("").astype(str)
 
-        rows_text = []
         cols = list(df.columns)
-        rows_text.append(f"=== Sheet: {sheet} | Columns: {', '.join(cols)} ===")
+        rows_text = [f"=== Sheet: {sheet} | Columns: {', '.join(str(c) for c in cols)} ==="]
 
         for _, row in df.iterrows():
-            # Skip rows where every cell is empty
             values = [str(row[c]).strip() for c in cols]
             if not any(values):
                 continue
-            # Format as "ColumnName: value | ColumnName: value …"
+            # Each row on its own line: "ColName: value | ColName: value …"
             pairs = " | ".join(f"{c}: {v}" for c, v in zip(cols, values) if v)
             rows_text.append(pairs)
 
