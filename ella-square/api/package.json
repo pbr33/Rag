@@ -1,0 +1,28 @@
+{
+  "name": "ella-square-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/src/functions/*.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "prestart": "npm run build",
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/ai-form-recognizer": "^5.0.0",
+    "@azure/ai-language-text": "^1.1.0",
+    "@azure/ai-content-safety": "^1.0.0",
+    "@azure/identity": "^4.3.0",
+    "@azure/search-documents": "^12.1.0",
+    "@azure/storage-blob": "^12.24.0",
+    "@azure/functions": "^4.3.0",
+    "openai": "^4.52.0",
+    "botbuilder": "^4.23.0",
+    "botframework-connector": "^4.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "typescript": "^5.5.3"
+  }
+}

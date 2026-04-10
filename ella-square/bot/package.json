@@ -1,0 +1,22 @@
+{
+  "name": "ella-square-bot",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "func start",
+    "prestart": "npm run build"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.3.0",
+    "@azure/identity": "^4.3.0",
+    "botbuilder": "^4.23.0",
+    "botframework-connector": "^4.23.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "typescript": "^5.5.3"
+  }
+}

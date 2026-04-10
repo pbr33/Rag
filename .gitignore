@@ -1,9 +1,11 @@
 node_modules/
-backend/node_modules/
-frontend/node_modules/
-backend/uploads/
-backend/.env
-.env
-*.log
 dist/
+.env
+config.env
+local.settings.json
+*.zip
 .DS_Store
+.vscode/
+*.log
+ella-square/teams-app/.vite/
+ella-square/manifest/assets/*.png
