@@ -1,0 +1,11 @@
+{
+  "name": "ella-square",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev":     "npm run dev     --prefix teams-app",
+    "build":   "npm run build   --prefix teams-app",
+    "preview": "npm run preview --prefix teams-app",
+    "install:all": "npm install --prefix teams-app && npm install --prefix api && npm install --prefix bot"
+  }
+}
